@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Renderer.h"
 
 using namespace winrt;
 
@@ -16,6 +17,8 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     Visual m_selected{ nullptr };
     float2 m_offset{};
 
+    Renderer *renderer;
+
     IFrameworkView CreateView()
     {
         return *this;
@@ -23,6 +26,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 
     void Initialize(CoreApplicationView const &)
     {
+        renderer = new Renderer(CoreWindow::GetForCurrentThread());
     }
 
     void Load(hstring const&)
@@ -31,6 +35,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 
     void Uninitialize()
     {
+        delete(renderer);
     }
 
     void Run()

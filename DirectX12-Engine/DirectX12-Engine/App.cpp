@@ -26,7 +26,6 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 
     void Initialize(CoreApplicationView const &)
     {
-        renderer = new Renderer(CoreWindow::GetForCurrentThread());
     }
 
     void Load(hstring const&)
@@ -62,6 +61,8 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
         {
             m_selected = nullptr;
         });
+
+        renderer = new Renderer();
     }
 
     void OnPointerPressed(IInspectable const &, PointerEventArgs const & args)

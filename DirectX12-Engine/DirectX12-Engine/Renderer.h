@@ -44,6 +44,8 @@ private:
     winrt::com_ptr<ID3D12Fence> m_fence;
     UINT64 m_fenceValue;
 
+    winrt::com_ptr<ID3D12RootSignature> rootSignature;
+
     void initializeCoreApi();
     void initializeResources();
 };

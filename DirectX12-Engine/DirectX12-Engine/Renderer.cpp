@@ -1,3 +1,5 @@
+#include <array>
+
 #include "pch.h"
 #include "Renderer.h"
 
@@ -106,6 +108,40 @@ void Renderer::initializeCoreApi()
 
 void Renderer::initializeResources()
 {
+    // Create the root signature
+    D3D12_FEATURE_DATA_ROOT_SIGNATURE featureDataRootSignature = {};
+    featureDataRootSignature.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+    winrt::check_hresult(m_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureDataRootSignature, sizeof(featureDataRootSignature)));
+
+    // Descriptors
+    std::array<D3D12_DESCRIPTOR_RANGE1, 1> ranges;
+    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+    ranges[0].NumDescriptors = 1;
+    ranges[0].BaseShaderRegister = 0;
+    ranges[0].RegisterSpace = 0;
+    ranges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+    ranges[0].OffsetInDescriptorsFromTableStart = 0;
+
+    // Groups of GPU Resources
+    std::array<D3D12_ROOT_PARAMETER1, 1> rootParameters;
+    rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+    rootParameters[0].DescriptorTable.NumDescriptorRanges = 1;
+    rootParameters[0].DescriptorTable.pDescriptorRanges = ranges.data();
+
+    // Overall Layout
+    D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+    rootSignatureDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
+    rootSignatureDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    rootSignatureDesc.Desc_1_1.NumParameters = 1;
+    rootSignatureDesc.Desc_1_1.pParameters = rootParameters.data();
+    rootSignatureDesc.Desc_1_1.NumStaticSamplers = 0;
+    rootSignatureDesc.Desc_1_1.pStaticSamplers = nullptr;
+
+    winrt::com_ptr<ID3DBlob> signature;
+    winrt::com_ptr<ID3DBlob> error;
+    winrt::check_hresult(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put()));
+    winrt::check_hresult(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), __uuidof(rootSignature), rootSignature.put_void()));
 }
 
 void Renderer::setupSwapchain(UINT width, UINT height)

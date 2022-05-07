@@ -2,6 +2,8 @@
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#include <d3dcompiler.h>
+#include <direct.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.ApplicationModel.Core.h>

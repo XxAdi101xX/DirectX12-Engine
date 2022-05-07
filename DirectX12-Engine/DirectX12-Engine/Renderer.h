@@ -27,12 +27,20 @@ private:
     winrt::com_ptr<IDXGIAdapter1> m_adapter;
     winrt::com_ptr<ID3D12Device> m_device;
     winrt::com_ptr<ID3D12CommandQueue> m_commandQueue;
-    winrt::com_ptr<ID3D12CommandAllocator> m_commandAllocator[FrameCount];
+    winrt::com_ptr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
     winrt::com_ptr<ID3D12GraphicsCommandList> m_graphicsCommandList;
     winrt::com_ptr<IDXGISwapChain3> m_swapChain;
+
+    // Resources
     D3D12_VIEWPORT m_viewport;
     D3D12_RECT m_surfaceSize;
 
+    winrt::com_ptr<ID3D12Resource> m_vertexBuffer;
+    winrt::com_ptr<ID3D12Resource> m_indexBuffer;
+    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+    D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
+
+    // Frame resources
     UINT m_currentFrame;
     UINT m_rtvDescriptorSize;
     winrt::com_ptr<ID3D12DescriptorHeap> m_rtvHeap;
@@ -44,7 +52,27 @@ private:
     winrt::com_ptr<ID3D12Fence> m_fence;
     UINT64 m_fenceValue;
 
-    winrt::com_ptr<ID3D12RootSignature> rootSignature;
+    winrt::com_ptr<ID3D12RootSignature> m_rootSignature;
+    winrt::com_ptr<ID3D12PipelineState> m_pipelineState;
+
+    struct Vertex
+    {
+        float position[3];
+        float color[4];
+    };
+
+    Vertex mVertexBufferData[3] =
+    {
+        {{1.0f, -1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{-1.0f, -1.0f, 0.0f}, {0.0f, 1.0f, 0.0, 1.0f}},
+        {{0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}
+    };
+
+    uint32_t mIndexBufferData[3] = { 0u, 1u, 2u };
+
+    winrt::com_ptr<ID3D12Resource> m_uniformBuffer;
+    winrt::com_ptr<ID3D12DescriptorHeap> m_uniformBufferHeap;
+    UINT8 *mMappedUniformBuffer;
 
     void initializeCoreApi();
     void initializeResources();

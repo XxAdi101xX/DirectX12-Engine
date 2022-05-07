@@ -76,4 +76,5 @@ private:
 
     void initializeCoreApi();
     void initializeResources();
+    void populateCommandList();
 };

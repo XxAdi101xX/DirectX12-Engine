@@ -242,6 +242,7 @@ void Renderer::initializeResources()
 
     // Create the command list.
     winrt::check_hresult(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].get(), m_pipelineState.get(), __uuidof(m_graphicsCommandList), m_graphicsCommandList.put_void()));
+    winrt::check_hresult(m_graphicsCommandList->Close());
 
     // Create the vertex buffer.
     const UINT vertexBufferSize = sizeof(mVertexBufferData);
@@ -370,6 +371,69 @@ void Renderer::initializeResources()
     }
 
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+}
+
+void Renderer::populateCommandList()
+{
+    // Command list allocators can only be reset when the associated
+// command lists have finished execution on the GPU; apps should use
+// fences to determine GPU execution progress.
+    winrt::check_hresult(m_commandAllocators[m_frameIndex]->Reset());
+
+    // However, when ExecuteCommandList() is called on a particular command
+    // list, that command list can then be reset at any time and must be before
+    // re-recording.
+    winrt::check_hresult(m_graphicsCommandList->Reset(m_commandAllocators[m_frameIndex].get(), m_pipelineState.get()));
+
+    // Set necessary state.
+    m_graphicsCommandList->SetGraphicsRootSignature(m_rootSignature.get());
+    m_graphicsCommandList->RSSetViewports(1, &m_viewport);
+    m_graphicsCommandList->RSSetScissorRects(1, &m_surfaceSize);
+
+    //ID3D12DescriptorHeap *pDescriptorHeaps[] = { mUniformBufferHeap };
+    //m_graphicsCommandList->SetDescriptorHeaps(_countof(pDescriptorHeaps), pDescriptorHeaps);
+    //D3D12_GPU_DESCRIPTOR_HANDLE srvHandle(mUniformBufferHeap->GetGPUDescriptorHandleForHeapStart());
+    //mCommandList->SetGraphicsRootDescriptorTable(0, srvHandle);
+
+    // Indicate that the back buffer will be used as a render target.
+    D3D12_RESOURCE_BARRIER renderTargetBarrier;
+    renderTargetBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    renderTargetBarrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    renderTargetBarrier.Transition.pResource = m_renderTargets[m_frameIndex].get();
+    renderTargetBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    renderTargetBarrier.Transition.StateAfter =
+        D3D12_RESOURCE_STATE_RENDER_TARGET;
+    renderTargetBarrier.Transition.Subresource =
+        D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+    m_graphicsCommandList->ResourceBarrier(1, &renderTargetBarrier);
+
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle(
+        m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
+    rtvHandle.ptr = rtvHandle.ptr + (m_frameIndex * m_rtvDescriptorSize);
+    m_graphicsCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+    // Record commands.
+    const float clearColor[] = { 0.2f, 0.2f, 0.2f, 1.0f };
+    m_graphicsCommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+    m_graphicsCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    m_graphicsCommandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+    m_graphicsCommandList->IASetIndexBuffer(&m_indexBufferView);
+
+    m_graphicsCommandList->DrawIndexedInstanced(3, 1, 0, 0, 0);
+
+    // Indicate that the back buffer will now be used to present.
+    D3D12_RESOURCE_BARRIER presentBarrier;
+    presentBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    presentBarrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    presentBarrier.Transition.pResource = m_renderTargets[m_frameIndex].get();
+    presentBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    presentBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    presentBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+    m_graphicsCommandList->ResourceBarrier(1, &presentBarrier);
+
+    winrt::check_hresult(m_graphicsCommandList->Close());
 }
 
 void Renderer::setupSwapchain(UINT width, UINT height)

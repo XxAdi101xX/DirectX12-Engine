@@ -50,7 +50,7 @@ private:
     UINT m_frameIndex;
     HANDLE m_fenceEvent;
     winrt::com_ptr<ID3D12Fence> m_fence;
-    UINT64 m_fenceValue;
+    UINT64 m_fenceValues[FrameCount];
 
     winrt::com_ptr<ID3D12RootSignature> m_rootSignature;
     winrt::com_ptr<ID3D12PipelineState> m_pipelineState;
@@ -77,4 +77,6 @@ private:
     void initializeCoreApi();
     void initializeResources();
     void populateCommandList();
+
+    void waitForGpu();
 };

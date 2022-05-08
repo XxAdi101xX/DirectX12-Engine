@@ -15,10 +15,39 @@ Renderer::Renderer()
 
 Renderer::~Renderer()
 {
+    waitForGpu();
+
+    CloseHandle(m_fenceEvent);
 }
 
 void Renderer::render()
 {
+    // Records the commands that are to be called per frame
+    populateCommandList();
+
+    // Execute the command list.
+    ID3D12CommandList *ppGraphicsCommandLists[] = { m_graphicsCommandList.get() };
+    m_commandQueue->ExecuteCommandLists(_countof(ppGraphicsCommandLists), ppGraphicsCommandLists);
+
+    // Present the frame.
+    winrt::check_hresult(m_swapChain->Present(1, 0));
+
+    // Schedule a Signal command in the queue.
+    const UINT64 currentFenceValue = m_fenceValues[m_frameIndex];
+    winrt::check_hresult(m_commandQueue->Signal(m_fence.get(), currentFenceValue));
+
+    // Update the frame index.
+    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+
+    // If the next frame is not ready to be rendered yet, wait until it is ready.
+    if (m_fence->GetCompletedValue() < m_fenceValues[m_frameIndex])
+    {
+        winrt::check_hresult(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
+        WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+    }
+
+    // Set the fence value for the next frame.
+    m_fenceValues[m_frameIndex] = currentFenceValue + 1;
 }
 
 void Renderer::resize(UINT width, UINT height)
@@ -344,9 +373,11 @@ void Renderer::initializeResources()
     m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
     m_indexBufferView.SizeInBytes = indexBufferSize;
 
-    // Create synchronization objects and wait until assets have been uploaded
-    // to the GPU.
-    m_fenceValue = 1;
+    // Initialize fence values
+    for (UINT i = 0; i < FrameCount; ++i)
+    {
+        m_fenceValues[i] = 0u;
+    }
 
     // Create an event handle to use for frame synchronization.
     m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
@@ -355,29 +386,28 @@ void Renderer::initializeResources()
         winrt::check_hresult(HRESULT_FROM_WIN32(GetLastError()));
     }
 
-    // Wait for the command list to execute; we are reusing the same command
-    // list in our main loop but for now, we just want to wait for setup to
-    // complete before continuing.
-    // Signal and increment the fence value.
-    const UINT64 fence = m_fenceValue;
-    winrt::check_hresult(m_commandQueue->Signal(m_fence.get(), fence));
-    m_fenceValue++;
+    waitForGpu();
+}
 
-    // Wait until the previous frame is finished.
-    if (m_fence->GetCompletedValue() < fence)
-    {
-        winrt::check_hresult(m_fence->SetEventOnCompletion(fence, m_fenceEvent));
-        WaitForSingleObject(m_fenceEvent, INFINITE);
-    }
+// Wait for pending GPU work to complete.
+void Renderer::waitForGpu()
+{
+    // Schedule a Signal command in the queue.
+    winrt::check_hresult(m_commandQueue->Signal(m_fence.get(), m_fenceValues[m_frameIndex]));
 
-    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+    // Wait until the fence has been processed.
+    winrt::check_hresult(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
+    WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+
+    // Increment the fence value for the current frame.
+    m_fenceValues[m_frameIndex]++;
 }
 
 void Renderer::populateCommandList()
 {
     // Command list allocators can only be reset when the associated
-// command lists have finished execution on the GPU; apps should use
-// fences to determine GPU execution progress.
+    // command lists have finished execution on the GPU; apps should use
+    // fences to determine GPU execution progress.
     winrt::check_hresult(m_commandAllocators[m_frameIndex]->Reset());
 
     // However, when ExecuteCommandList() is called on a particular command

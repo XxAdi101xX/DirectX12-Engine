@@ -7,6 +7,8 @@ public:
 
     ~Renderer();
 
+    void cleanUp();
+
     // Render onto the render target
     void render();
 

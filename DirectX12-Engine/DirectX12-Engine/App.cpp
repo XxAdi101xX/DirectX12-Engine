@@ -42,8 +42,14 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
         CoreWindow window = CoreWindow::GetForCurrentThread();
         window.Activate();
 
-        CoreDispatcher dispatcher = window.Dispatcher();
-        dispatcher.ProcessEvents(CoreProcessEventsOption::ProcessUntilQuit);
+
+        while (true)
+        {
+            window.Dispatcher().ProcessEvents(CoreProcessEventsOption::ProcessAllIfPresent);
+            renderer->render();
+        }
+
+        renderer->cleanUp();
     }
 
     void SetWindow(CoreWindow const & window)

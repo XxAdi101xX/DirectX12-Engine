@@ -15,8 +15,11 @@ Renderer::Renderer()
 
 Renderer::~Renderer()
 {
-    waitForGpu();
+}
 
+void Renderer::cleanUp()
+{
+    waitForGpu();
     CloseHandle(m_fenceEvent);
 }
 
@@ -52,6 +55,7 @@ void Renderer::render()
 
 void Renderer::resize(UINT width, UINT height)
 {
+    // TODO
 }
 
 struct

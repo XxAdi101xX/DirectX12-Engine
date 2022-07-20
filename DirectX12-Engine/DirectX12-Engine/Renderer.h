@@ -72,9 +72,10 @@ private:
 
     uint32_t mIndexBufferData[3] = { 0u, 1u, 2u };
 
+    std::vector<float> m_uniformBufferData;
     winrt::com_ptr<ID3D12Resource> m_uniformBuffer;
-    winrt::com_ptr<ID3D12DescriptorHeap> m_uniformBufferHeap;
-    UINT8 *mMappedUniformBuffer;
+    winrt::com_ptr<ID3D12DescriptorHeap> m_CbvSrvUavHeap;
+    UINT8 *m_mappedUniformBuffer;
 
     void initializeCoreApi();
     void initializeResources();

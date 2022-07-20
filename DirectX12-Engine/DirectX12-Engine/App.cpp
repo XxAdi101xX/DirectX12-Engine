@@ -42,7 +42,6 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
         CoreWindow window = CoreWindow::GetForCurrentThread();
         window.Activate();
 
-
         while (true)
         {
             window.Dispatcher().ProcessEvents(CoreProcessEventsOption::ProcessAllIfPresent);

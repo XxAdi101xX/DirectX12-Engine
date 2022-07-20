@@ -83,9 +83,7 @@ void Renderer::initializeCoreApi()
     winrt::check_hresult(CreateDXGIFactory2(dxgiFactoryFlags, __uuidof(m_factory), m_factory.put_void()));
 
     // Create Adapter
-    for (UINT adapterIndex = 0;
-        DXGI_ERROR_NOT_FOUND != m_factory->EnumAdapters1(adapterIndex, m_adapter.put());
-        ++adapterIndex)
+    for (UINT adapterIndex = 0; DXGI_ERROR_NOT_FOUND != m_factory->EnumAdapters1(adapterIndex, m_adapter.put()); ++adapterIndex)
     {
         DXGI_ADAPTER_DESC1 desc = {};
         m_adapter->GetDesc1(&desc);
@@ -151,26 +149,33 @@ void Renderer::initializeResources()
     winrt::check_hresult(m_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureDataRootSignature, sizeof(featureDataRootSignature)));
 
     // Descriptors
-    std::array<D3D12_DESCRIPTOR_RANGE1, 1> ranges;
-    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    ranges[0].NumDescriptors = 1;
-    ranges[0].BaseShaderRegister = 0;
-    ranges[0].RegisterSpace = 0;
-    ranges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
-    ranges[0].OffsetInDescriptorsFromTableStart = 0;
+    std::array<D3D12_DESCRIPTOR_RANGE1, 1> descriptorRanges;
+    descriptorRanges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+    descriptorRanges[0].NumDescriptors = 1;
+    descriptorRanges[0].BaseShaderRegister = 0;
+    descriptorRanges[0].RegisterSpace = 0;
+    descriptorRanges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+    descriptorRanges[0].OffsetInDescriptorsFromTableStart = 0;
 
     // Groups of GPU Resources
     std::array<D3D12_ROOT_PARAMETER1, 1> rootParameters;
     rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-    rootParameters[0].DescriptorTable.NumDescriptorRanges = 1;
-    rootParameters[0].DescriptorTable.pDescriptorRanges = ranges.data();
+    rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    rootParameters[0].DescriptorTable.NumDescriptorRanges = descriptorRanges.size();
+    rootParameters[0].DescriptorTable.pDescriptorRanges = descriptorRanges.data();
+
+    // Allow input layout and deny uneccessary access to hull, domain and geometry shaders
+    D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
+        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
     // Overall Layout
     D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
     rootSignatureDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-    rootSignatureDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
-    rootSignatureDesc.Desc_1_1.NumParameters = 1;
+    rootSignatureDesc.Desc_1_1.Flags = rootSignatureFlags;
+    rootSignatureDesc.Desc_1_1.NumParameters = rootParameters.size();
     rootSignatureDesc.Desc_1_1.pParameters = rootParameters.data();
     rootSignatureDesc.Desc_1_1.NumStaticSamplers = 0;
     rootSignatureDesc.Desc_1_1.pStaticSamplers = nullptr;
@@ -204,6 +209,13 @@ void Renderer::initializeResources()
     std::vector<byte> vertexShaderBytecode{ m_basicReaderWriter.ReadData(vertCompiledPathW.c_str()) };
     std::vector<byte> pixelShaderBytecode{ m_basicReaderWriter.ReadData(pixelCompiledPathW.c_str()) };
 
+    D3D12_SHADER_BYTECODE vsBytecode;
+    D3D12_SHADER_BYTECODE psBytecode;
+    vsBytecode.pShaderBytecode = vertexShaderBytecode.data();
+    vsBytecode.BytecodeLength = vertexShaderBytecode.size();
+    psBytecode.pShaderBytecode = pixelShaderBytecode.data();
+    psBytecode.BytecodeLength = pixelShaderBytecode.size();
+
     // Define the vertex input layout.
     D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
     {
@@ -215,16 +227,6 @@ void Renderer::initializeResources()
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
     psoDesc.pRootSignature = m_rootSignature.get();
-
-    D3D12_SHADER_BYTECODE vsBytecode;
-    D3D12_SHADER_BYTECODE psBytecode;
-
-    vsBytecode.pShaderBytecode = vertexShaderBytecode.data();
-    vsBytecode.BytecodeLength = vertexShaderBytecode.size();
-
-    psBytecode.pShaderBytecode = pixelShaderBytecode.data();
-    psBytecode.BytecodeLength = pixelShaderBytecode.size();
-
     psoDesc.VS = vsBytecode;
     psoDesc.PS = psBytecode;
 
@@ -276,6 +278,71 @@ void Renderer::initializeResources()
     // Create the command list.
     winrt::check_hresult(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].get(), m_pipelineState.get(), __uuidof(m_graphicsCommandList), m_graphicsCommandList.put_void()));
     winrt::check_hresult(m_graphicsCommandList->Close());
+
+    // Create the descriptor heap
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+    heapDesc.NumDescriptors = 1;
+    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    winrt::check_hresult(m_device->CreateDescriptorHeap(&heapDesc, __uuidof(m_CbvSrvUavHeap), m_CbvSrvUavHeap.put_void()));
+
+    // Create the Constant buffer
+    //m_uniformBufferData.resize(winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Width * winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Height);
+    m_uniformBufferData.resize(64); // TODO CHANGE THIS
+    std::fill(m_uniformBufferData.begin(), m_uniformBufferData.end(), 1.0f);
+
+    float a = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Width;
+    float b = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Height;
+
+    // Note: using upload heaps to transfer static data like vert
+    // buffers is not recommended. Every time the GPU needs it, the
+    // upload heap will be marshalled over. Please read up on Default
+    // Heap usage. An upload heap is used here for code simplicity and
+    // because there are very few verts to actually transfer.
+    D3D12_HEAP_PROPERTIES heapProps;
+    heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+    heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    heapProps.CreationNodeMask = 1;
+    heapProps.VisibleNodeMask = 1;
+
+    const size_t uniformBufferSize = sizeof(m_uniformBufferData[0]) * m_uniformBufferData.size();
+
+    D3D12_RESOURCE_DESC uboResourceDesc;
+    uboResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    uboResourceDesc.Alignment = 0;
+    uboResourceDesc.Width = (uniformBufferSize + 255) & ~255;
+    uboResourceDesc.Height = 1;
+    uboResourceDesc.DepthOrArraySize = 1;
+    uboResourceDesc.MipLevels = 1;
+    uboResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+    uboResourceDesc.SampleDesc.Count = 1;
+    uboResourceDesc.SampleDesc.Quality = 0;
+    uboResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    uboResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+    winrt::check_hresult(m_device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE, &uboResourceDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        __uuidof(m_uniformBuffer), m_uniformBuffer.put_void()));
+
+    D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+    cbvDesc.BufferLocation = m_uniformBuffer->GetGPUVirtualAddress();
+    cbvDesc.SizeInBytes = (uniformBufferSize + 255) & ~255; // CB size is required to be 256-byte aligned.
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle(m_CbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
+    cbvHandle.ptr = cbvHandle.ptr + m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * 0;
+
+    m_device->CreateConstantBufferView(&cbvDesc, cbvHandle);
+
+    // We do not intend to read from this resource on the CPU. (End is less than or equal to begin)
+    D3D12_RANGE constantBufferReadRange;
+    constantBufferReadRange.Begin = 0;
+    constantBufferReadRange.End = 0;
+
+    winrt::check_hresult(m_uniformBuffer->Map(0, &constantBufferReadRange,reinterpret_cast<void **>(&m_mappedUniformBuffer)));
+    memcpy(m_mappedUniformBuffer, m_uniformBufferData.data(), uniformBufferSize);
+    m_uniformBuffer->Unmap(0, &constantBufferReadRange);
 
     // Create the vertex buffer.
     const UINT vertexBufferSize = sizeof(mVertexBufferData);
@@ -424,10 +491,10 @@ void Renderer::populateCommandList()
     m_graphicsCommandList->RSSetViewports(1, &m_viewport);
     m_graphicsCommandList->RSSetScissorRects(1, &m_surfaceSize);
 
-    //ID3D12DescriptorHeap *pDescriptorHeaps[] = { mUniformBufferHeap };
-    //m_graphicsCommandList->SetDescriptorHeaps(_countof(pDescriptorHeaps), pDescriptorHeaps);
-    //D3D12_GPU_DESCRIPTOR_HANDLE srvHandle(mUniformBufferHeap->GetGPUDescriptorHandleForHeapStart());
-    //mCommandList->SetGraphicsRootDescriptorTable(0, srvHandle);
+    std::array<ID3D12DescriptorHeap *, 1> pDescriptorHeaps { m_CbvSrvUavHeap.get()};
+    m_graphicsCommandList->SetDescriptorHeaps(pDescriptorHeaps.size(), pDescriptorHeaps.data());
+    D3D12_GPU_DESCRIPTOR_HANDLE srvHandle(m_CbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+    m_graphicsCommandList->SetGraphicsRootDescriptorTable(0, srvHandle);
 
     // Indicate that the back buffer will be used as a render target.
     D3D12_RESOURCE_BARRIER renderTargetBarrier;
@@ -435,15 +502,12 @@ void Renderer::populateCommandList()
     renderTargetBarrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
     renderTargetBarrier.Transition.pResource = m_renderTargets[m_frameIndex].get();
     renderTargetBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-    renderTargetBarrier.Transition.StateAfter =
-        D3D12_RESOURCE_STATE_RENDER_TARGET;
-    renderTargetBarrier.Transition.Subresource =
-        D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    renderTargetBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    renderTargetBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 
     m_graphicsCommandList->ResourceBarrier(1, &renderTargetBarrier);
 
-    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle(
-        m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
     rtvHandle.ptr = rtvHandle.ptr + (m_frameIndex * m_rtvDescriptorSize);
     m_graphicsCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 

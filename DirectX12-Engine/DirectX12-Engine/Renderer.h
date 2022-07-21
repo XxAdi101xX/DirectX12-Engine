@@ -72,10 +72,17 @@ private:
 
     uint32_t mIndexBufferData[3] = { 0u, 1u, 2u };
 
+    winrt::com_ptr<ID3D12DescriptorHeap> m_cbvSrvUavHeap;
+
     std::vector<float> m_uniformBufferData;
     winrt::com_ptr<ID3D12Resource> m_uniformBuffer;
-    winrt::com_ptr<ID3D12DescriptorHeap> m_CbvSrvUavHeap;
     UINT8 *m_mappedUniformBuffer;
+
+    std::vector<float> m_uavData;
+    winrt::com_ptr<ID3D12Resource> m_uavBuffer;
+
+    winrt::com_ptr<ID3D12Resource> m_stagingBuffer;
+    UINT8 *m_mappedStagingBuffer;
 
     void initializeCoreApi();
     void initializeResources();

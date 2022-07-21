@@ -75,7 +75,7 @@ void Renderer::initializeCoreApi()
 #if defined(_DEBUG)
     winrt::check_hresult(D3D12GetDebugInterface(__uuidof(m_debugController), m_debugController.put_void()));
     m_debugController->EnableDebugLayer();
-    m_debugController->SetEnableGPUBasedValidation(true);
+    //m_debugController->SetEnableGPUBasedValidation(true);
     dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
 #endif
 
@@ -148,14 +148,28 @@ void Renderer::initializeResources()
     featureDataRootSignature.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
     winrt::check_hresult(m_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureDataRootSignature, sizeof(featureDataRootSignature)));
 
+    // Create the descriptor heap
+    D3D12_DESCRIPTOR_HEAP_DESC cbvSrvUavheapDesc = {};
+    cbvSrvUavheapDesc.NumDescriptors = 2; // This value should be updated whenever a new descriptor for this heap is added
+    cbvSrvUavheapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    cbvSrvUavheapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    winrt::check_hresult(m_device->CreateDescriptorHeap(&cbvSrvUavheapDesc, __uuidof(m_cbvSrvUavHeap), m_cbvSrvUavHeap.put_void()));
+
     // Descriptors
-    std::array<D3D12_DESCRIPTOR_RANGE1, 1> descriptorRanges;
+    std::array<D3D12_DESCRIPTOR_RANGE1, 2> descriptorRanges;
     descriptorRanges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
     descriptorRanges[0].NumDescriptors = 1;
     descriptorRanges[0].BaseShaderRegister = 0;
     descriptorRanges[0].RegisterSpace = 0;
-    descriptorRanges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+    descriptorRanges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
     descriptorRanges[0].OffsetInDescriptorsFromTableStart = 0;
+
+    descriptorRanges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    descriptorRanges[1].NumDescriptors = 1;
+    descriptorRanges[1].BaseShaderRegister = 1; // The 0th register is reserved for the render target so we must start at one
+    descriptorRanges[1].RegisterSpace = 0;
+    descriptorRanges[1].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
+    descriptorRanges[1].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
     // Groups of GPU Resources
     std::array<D3D12_ROOT_PARAMETER1, 1> rootParameters;
@@ -279,32 +293,16 @@ void Renderer::initializeResources()
     winrt::check_hresult(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].get(), m_pipelineState.get(), __uuidof(m_graphicsCommandList), m_graphicsCommandList.put_void()));
     winrt::check_hresult(m_graphicsCommandList->Close());
 
-    // Create the descriptor heap
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = 1;
-    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    winrt::check_hresult(m_device->CreateDescriptorHeap(&heapDesc, __uuidof(m_CbvSrvUavHeap), m_CbvSrvUavHeap.put_void()));
-
     // Create the Constant buffer
-    //m_uniformBufferData.resize(winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Width * winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Height);
     m_uniformBufferData.resize(64); // TODO CHANGE THIS
-    std::fill(m_uniformBufferData.begin(), m_uniformBufferData.end(), 1.0f);
+    std::fill(m_uniformBufferData.begin(), m_uniformBufferData.end(), 0.5f);
 
-    float a = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Width;
-    float b = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Height;
-
-    // Note: using upload heaps to transfer static data like vert
-    // buffers is not recommended. Every time the GPU needs it, the
-    // upload heap will be marshalled over. Please read up on Default
-    // Heap usage. An upload heap is used here for code simplicity and
-    // because there are very few verts to actually transfer.
-    D3D12_HEAP_PROPERTIES heapProps;
-    heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-    heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-    heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-    heapProps.CreationNodeMask = 1;
-    heapProps.VisibleNodeMask = 1;
+    D3D12_HEAP_PROPERTIES constantBufferHeapProps = {};
+    constantBufferHeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+    constantBufferHeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    constantBufferHeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    constantBufferHeapProps.CreationNodeMask = 1;
+    constantBufferHeapProps.VisibleNodeMask = 1;
 
     const size_t uniformBufferSize = sizeof(m_uniformBufferData[0]) * m_uniformBufferData.size();
 
@@ -322,18 +320,18 @@ void Renderer::initializeResources()
     uboResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
     winrt::check_hresult(m_device->CreateCommittedResource(
-        &heapProps, D3D12_HEAP_FLAG_NONE, &uboResourceDesc,
+        &constantBufferHeapProps, D3D12_HEAP_FLAG_NONE, &uboResourceDesc,
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
         __uuidof(m_uniformBuffer), m_uniformBuffer.put_void()));
 
-    D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-    cbvDesc.BufferLocation = m_uniformBuffer->GetGPUVirtualAddress();
-    cbvDesc.SizeInBytes = (uniformBufferSize + 255) & ~255; // CB size is required to be 256-byte aligned.
+    std::array<D3D12_CONSTANT_BUFFER_VIEW_DESC, 1> cbvDesc;
+    cbvDesc[0].BufferLocation = m_uniformBuffer->GetGPUVirtualAddress();
+    cbvDesc[0].SizeInBytes = (uniformBufferSize + 255) & ~255; // CB size is required to be 256-byte aligned.
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle(m_CbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
-    cbvHandle.ptr = cbvHandle.ptr + m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * 0;
+    D3D12_CPU_DESCRIPTOR_HANDLE cbvSrvUavHandle(m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
 
-    m_device->CreateConstantBufferView(&cbvDesc, cbvHandle);
+    m_device->CreateConstantBufferView(cbvDesc.data(), cbvSrvUavHandle);
+    cbvSrvUavHandle.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
     // We do not intend to read from this resource on the CPU. (End is less than or equal to begin)
     D3D12_RANGE constantBufferReadRange;
@@ -343,6 +341,105 @@ void Renderer::initializeResources()
     winrt::check_hresult(m_uniformBuffer->Map(0, &constantBufferReadRange,reinterpret_cast<void **>(&m_mappedUniformBuffer)));
     memcpy(m_mappedUniformBuffer, m_uniformBufferData.data(), uniformBufferSize);
     m_uniformBuffer->Unmap(0, &constantBufferReadRange);
+
+    // Describe and create an UAV.
+    {
+        D3D12_RESOURCE_DESC texDesc = {};
+        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        texDesc.Width = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Width;
+        texDesc.Height = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Height;
+        texDesc.DepthOrArraySize = 1;
+        texDesc.MipLevels = 1;
+        texDesc.Format = DXGI_FORMAT_R32_FLOAT; // Note that R32__FLOAT, R32_UINT and R32_SINT are the only guarenteed supported formats for uavs, otherwise you have to query for support (see https://logins.github.io/graphics/2020/10/31/D3D12ComputeShaders.html)
+        texDesc.SampleDesc.Count = 1;
+        texDesc.SampleDesc.Quality = 0;
+        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        texDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        D3D12_HEAP_PROPERTIES uavHeapProps = {};
+        uavHeapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+        uavHeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+        uavHeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+        uavHeapProps.CreationNodeMask = 1;
+        uavHeapProps.VisibleNodeMask = 1;
+        winrt::check_hresult(m_device->CreateCommittedResource(
+            &uavHeapProps, D3D12_HEAP_FLAG_NONE, &texDesc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+            __uuidof(m_uavBuffer), m_uavBuffer.put_void()));
+
+        std::array<D3D12_UNORDERED_ACCESS_VIEW_DESC, 1> uavDesc;
+        uavDesc[0].ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        uavDesc[0].Format = DXGI_FORMAT_R32_FLOAT;
+        uavDesc[0].Texture2D.MipSlice = 0; // TODO what is this
+        uavDesc[0].Texture2D.PlaneSlice = 0; // TODO what is this
+
+        // TODO counter resource is nullptr, do we need to implement this?
+        m_device->CreateUnorderedAccessView(m_uavBuffer.get(), nullptr, uavDesc.data(), cbvSrvUavHandle);
+        cbvSrvUavHandle.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        /*
+        // Create staging buffer
+        const float uavDataSize = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Width * winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().Bounds().Height;
+        m_uavData.resize(uavDataSize);
+        std::fill(m_uavData.begin(), m_uavData.end(), 1.0f);
+
+        D3D12_RESOURCE_DESC stagingBufferDesc = {};
+        stagingBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        stagingBufferDesc.Alignment = 0;
+        stagingBufferDesc.Width = uavDataSize;
+        stagingBufferDesc.Height = 1;
+        stagingBufferDesc.DepthOrArraySize = 1;
+        stagingBufferDesc.MipLevels = 1;
+        stagingBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+        stagingBufferDesc.SampleDesc.Count = 1;
+        stagingBufferDesc.SampleDesc.Quality = 0;
+        stagingBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        stagingBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        D3D12_HEAP_PROPERTIES stagingBufferHeapProps = {};
+        stagingBufferHeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+        stagingBufferHeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+        stagingBufferHeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+        stagingBufferHeapProps.CreationNodeMask = 1;
+        stagingBufferHeapProps.VisibleNodeMask = 1;
+        m_device->CreateCommittedResource(
+            &stagingBufferHeapProps, D3D12_HEAP_FLAG_NONE, &stagingBufferDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+            __uuidof(m_stagingBuffer), m_stagingBuffer.put_void());
+
+        // We do not intend to read from this resource on the CPU. (End is less than or equal to begin)
+        D3D12_RANGE stagingBufferReadRange;
+        stagingBufferReadRange.Begin = 0;
+        stagingBufferReadRange.End = 0;
+        winrt::check_hresult(m_stagingBuffer->Map(0, &stagingBufferReadRange, reinterpret_cast<void **>(&m_mappedStagingBuffer)));
+        memcpy(m_mappedStagingBuffer, m_uavData.data(), static_cast<size_t>(uavDataSize));
+        m_stagingBuffer->Unmap(0, &stagingBufferReadRange);
+
+
+        // Populate uav texture
+        winrt::check_hresult(m_commandAllocators[m_frameIndex]->Reset());
+        winrt::check_hresult(m_graphicsCommandList->Reset(m_commandAllocators[m_frameIndex].get(), m_pipelineState.get()));
+
+        D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+        srcLoc.pResource = m_stagingBuffer.get();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        m_device->GetCopyableFootprints(&stagingBufferDesc, 0, 1, 0, &srcLoc.PlacedFootprint, nullptr, nullptr, nullptr);
+        srcLoc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R32_FLOAT;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+        dstLoc.pResource = m_uavBuffer.get();
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = 0;
+
+        m_graphicsCommandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+        //winrt::check_hresult(m_graphicsCommandList->Close());
+        m_graphicsCommandList->Close();
+        // Execute the command list.
+        ID3D12CommandList *ppGraphicsCommandLists[] = { m_graphicsCommandList.get() };
+        m_commandQueue->ExecuteCommandLists(_countof(ppGraphicsCommandLists), ppGraphicsCommandLists);
+        */
+    }
 
     // Create the vertex buffer.
     const UINT vertexBufferSize = sizeof(mVertexBufferData);
@@ -491,9 +588,9 @@ void Renderer::populateCommandList()
     m_graphicsCommandList->RSSetViewports(1, &m_viewport);
     m_graphicsCommandList->RSSetScissorRects(1, &m_surfaceSize);
 
-    std::array<ID3D12DescriptorHeap *, 1> pDescriptorHeaps { m_CbvSrvUavHeap.get()};
+    std::array<ID3D12DescriptorHeap *, 1> pDescriptorHeaps { m_cbvSrvUavHeap.get()};
     m_graphicsCommandList->SetDescriptorHeaps(pDescriptorHeaps.size(), pDescriptorHeaps.data());
-    D3D12_GPU_DESCRIPTOR_HANDLE srvHandle(m_CbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+    D3D12_GPU_DESCRIPTOR_HANDLE srvHandle(m_cbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
     m_graphicsCommandList->SetGraphicsRootDescriptorTable(0, srvHandle);
 
     // Indicate that the back buffer will be used as a render target.
